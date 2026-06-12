@@ -2,8 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { 
   Play, Plus, Key, RefreshCw, Copy, 
-  LogOut, HelpCircle, User, Hash, Users
+  LogOut, HelpCircle, User, Hash, Users, 
+  Settings, ChevronDown, ChevronUp
 } from 'lucide-react';
+import confetti from 'canvas-confetti';
+import { playKeyClick, playErrorBuzzer, playTurnSwitch, playWinChime } from './audio';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || `http://${window.location.hostname}:3002`;
 
@@ -56,6 +59,13 @@ function App() {
   const [mobileTab, setMobileTab] = useState<'mine' | 'opponent'>('mine');
   const [gameOverTab, setGameOverTab] = useState<'mine' | 'opponent'>('mine');
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [opponentTyping, setOpponentTyping] = useState(false);
+  const typingTimeoutRef = useRef<number | null>(null);
+
+  // Custom Game Settings
+  const [showSettings, setShowSettings] = useState(false);
+  const [customLength, setCustomLength] = useState<number>(4);
+  const [allowDuplicates, setAllowDuplicates] = useState<boolean>(false);
   
   // UI Helpers
   const toastTimeoutRef = useRef<number | null>(null);
@@ -108,6 +118,12 @@ function App() {
       showToast(message);
     });
 
+    s.on('opponent-typing', () => {
+      setOpponentTyping(true);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = window.setTimeout(() => setOpponentTyping(false), 2000);
+    });
+
     return () => {
       s.disconnect();
     };
@@ -130,9 +146,51 @@ function App() {
     }, 3000);
   };
 
+  // Helper variables (lookup by name for resilience against socket ID changes on disconnect/reconnect)
+  const myPlayer = room?.players.find(p => p.username.toLowerCase() === username.toLowerCase());
+  const opponent = room?.players.find(p => p.username.toLowerCase() !== username.toLowerCase());
+  const isMyTurn = room?.turnPlayerId === myPlayer?.id;
+
+  useEffect(() => {
+    if (room?.gameState === 'game_over' && room.winnerUsername) {
+      setGameOverTab('mine');
+      if (room.winnerUsername === myPlayer?.username) {
+        playWinChime();
+        triggerConfetti();
+      }
+    }
+  }, [room?.gameState, room?.winnerUsername, myPlayer?.username]);
+
+  useEffect(() => {
+    if (room?.gameState === 'playing' && room?.turnPlayerId === myPlayer?.id) {
+      playTurnSwitch();
+    }
+  }, [room?.turnPlayerId, room?.gameState, myPlayer?.id]);
+
+  const triggerConfetti = () => {
+    const duration = 3000;
+    const animationEnd = Date.now() + duration;
+    const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 };
+
+    const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
+
+    const interval: any = setInterval(function() {
+      const timeLeft = animationEnd - Date.now();
+
+      if (timeLeft <= 0) {
+        return clearInterval(interval);
+      }
+
+      const particleCount = 50 * (timeLeft / duration);
+      confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
+      confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
+    }, 250);
+  };
+
   const triggerShake = () => {
     setShake(true);
-    setTimeout(() => setShake(false), 300);
+    playErrorBuzzer();
+    setTimeout(() => setShake(false), 500);
   };
 
   const copyToClipboard = (text: string) => {
@@ -204,22 +262,27 @@ function App() {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key >= '0' && e.key <= '9') {
-        // Enforce no-duplicates rule
-        if (activeCode.includes(e.key)) {
+        // Enforce no-duplicates rule if applicable
+        if (!room.settings.allowDuplicates && activeCode.includes(e.key)) {
           showToast('Duplicate digits are not allowed!');
           triggerShake();
           return;
         }
-        if (activeCode.length < 4) {
+        if (activeCode.length < room.settings.codeLength) {
+          playKeyClick();
           setActiveCode(prev => prev + e.key);
+          socket?.emit('player-typing', { roomId: room.id });
+        } else {
+          playErrorBuzzer();
         }
       } else if (e.key === 'Backspace') {
+        playKeyClick();
         setActiveCode(prev => prev.slice(0, -1));
       } else if (e.key === 'Enter') {
-        if (activeCode.length === 4) {
+        if (activeCode.length === room.settings.codeLength) {
           submitCode();
         } else {
-          showToast('Please enter a 4-digit code');
+          showToast(`Please enter a ${room.settings.codeLength}-digit code`);
           triggerShake();
         }
       }
@@ -229,14 +292,19 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [room, activeCode, socket]);
 
-  // Action methods
   const createRoom = () => {
     if (!username.trim()) {
       showToast('Please enter your username first');
       triggerShake();
       return;
     }
-    socket?.emit('create-room', { username });
+    socket?.emit('create-room', { 
+      username, 
+      settings: { 
+        codeLength: customLength, 
+        allowDuplicates 
+      } 
+    });
   };
 
   const joinRoom = () => {
@@ -255,8 +323,8 @@ function App() {
 
   const submitCode = () => {
     if (!room) return;
-    if (activeCode.length !== 4) {
-      showToast('Code must be exactly 4 digits');
+    if (activeCode.length !== room.settings.codeLength) {
+      showToast(`Code must be exactly ${room.settings.codeLength} digits`);
       triggerShake();
       return;
     }
@@ -272,24 +340,39 @@ function App() {
   };
 
   const autoGenerateCode = () => {
+    if (!room) return;
+    const len = room.settings.codeLength;
+    const allowDup = room.settings.allowDuplicates;
     const digits = ['0','1','2','3','4','5','6','7','8','9'];
     let generated = '';
-    while (generated.length < 4) {
+    
+    while (generated.length < len) {
       const idx = Math.floor(Math.random() * digits.length);
-      const digit = digits.splice(idx, 1)[0];
+      const digit = allowDup ? digits[idx] : digits.splice(idx, 1)[0];
       generated += digit;
     }
     setActiveCode(generated);
-    showToast('Random unique 4-digit code generated!');
+    showToast(`Random ${len}-digit code generated!`);
   };
 
   const handleKeypadPress = (digit: string) => {
-    if (activeCode.length < 4) {
+    if (!room) return;
+    if (!room.settings.allowDuplicates && activeCode.includes(digit)) {
+      showToast('Duplicate digits are not allowed!');
+      triggerShake();
+      return;
+    }
+    if (activeCode.length < room.settings.codeLength) {
+      playKeyClick();
       setActiveCode(prev => prev + digit);
+      socket?.emit('player-typing', { roomId: room.id });
+    } else {
+      playErrorBuzzer();
     }
   };
 
   const handleKeypadDelete = () => {
+    playKeyClick();
     setActiveCode(prev => prev.slice(0, -1));
   };
 
@@ -304,10 +387,7 @@ function App() {
     showToast('rematch started! Choose new codes.');
   };
 
-  // Helper variables (lookup by name for resilience against socket ID changes on disconnect/reconnect)
-  const myPlayer = room?.players.find(p => p.username.toLowerCase() === username.toLowerCase());
-  const opponent = room?.players.find(p => p.username.toLowerCase() !== username.toLowerCase());
-  const isMyTurn = room?.turnPlayerId === myPlayer?.id;
+
 
   // LOBBY VIEW
   if (!room) {
@@ -334,14 +414,57 @@ function App() {
               placeholder="e.g., CodeBreaker"
               value={username}
               onChange={(e) => handleUsernameChange(e.target.value)}
-              style={{ paddingLeft: '46px' }}
+              style={{ paddingLeft: '44px', textAlign: 'left' }}
               maxLength={14}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') createRoom();
+              }}
             />
           </div>
-        </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <button className="btn-primary" onClick={createRoom}>
+          {/* Advanced Settings Toggle */}
+          <div style={{ marginTop: '4px' }}>
+            <button 
+              onClick={() => setShowSettings(!showSettings)}
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', margin: '0 auto' }}
+            >
+              <Settings size={14} /> Advanced Room Settings {showSettings ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+            </button>
+            
+            {showSettings && (
+              <div style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'left' }}>
+                <div>
+                  <label style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600, display: 'block', marginBottom: '8px' }}>CODE LENGTH</label>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {[4, 5, 6].map(len => (
+                      <button 
+                        key={len}
+                        onClick={() => setCustomLength(len)}
+                        style={{ flex: 1, padding: '8px', borderRadius: '8px', border: `1px solid ${customLength === len ? 'var(--color-primary)' : 'var(--border-color)'}`, background: customLength === len ? 'rgba(128, 14, 19, 0.2)' : 'transparent', color: customLength === len ? 'white' : 'var(--text-muted)', cursor: 'pointer', fontWeight: 600 }}
+                      >
+                        {len} Digits
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600, display: 'block' }}>ALLOW DUPLICATES</label>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>e.g. 1122 is valid</span>
+                  </div>
+                  <button 
+                    onClick={() => setAllowDuplicates(!allowDuplicates)}
+                    style={{ width: '44px', height: '24px', borderRadius: '12px', background: allowDuplicates ? 'var(--color-primary)' : 'rgba(255,255,255,0.1)', border: 'none', position: 'relative', cursor: 'pointer', transition: 'all 0.2s ease' }}
+                  >
+                    <div style={{ width: '18px', height: '18px', borderRadius: '50%', background: 'white', position: 'absolute', top: '3px', left: allowDuplicates ? '23px' : '3px', transition: 'all 0.2s ease' }} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+          
+          <button className="btn-primary" onClick={createRoom} style={{ marginTop: '8px' }}>
             <Plus size={20} /> Create New Room
           </button>
 
@@ -485,30 +608,30 @@ function App() {
               <div style={{ textAlign: 'center' }}>
                 <h2>Choose Your Secret Code</h2>
                 <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '6px' }}>
-                  Choose 4 unique digits. Opponent will try to guess this code.
+                  Choose {room.settings.codeLength} {room.settings.allowDuplicates ? '' : 'unique '}digits. Opponent will try to guess this code.
                 </p>
               </div>
 
               {/* Digit View */}
               <div className="digits-container">
-                {[0, 1, 2, 3].map((idx) => (
-                  <div 
-                    key={idx} 
-                    className={`digit-box ${idx === activeCode.length ? 'active' : ''} ${activeCode[idx] !== undefined ? 'filled' : ''}`}
-                  >
-                    {activeCode[idx] !== undefined ? activeCode[idx] : ''}
-                  </div>
-                ))}
-              </div>
+              {Array.from({ length: room.settings.codeLength }).map((_, idx) => (
+                <div 
+                  key={idx} 
+                  className={`digit-box ${idx === activeCode.length ? 'active' : ''} ${activeCode[idx] !== undefined ? 'filled' : ''}`}
+                >
+                  {activeCode[idx] !== undefined ? activeCode[idx] : ''}
+                </div>
+              ))}
+            </div>
 
               {/* Interactive Keypad */}
               <div className="keypad-grid">
                 {['0','1','2','3','4','5','6','7','8','9'].map((d) => (
                   <button 
                     key={d} 
-                    className="keypad-btn"
-                    disabled={activeCode.includes(d)}
-                    onClick={() => handleKeypadPress(d)}
+                  className="keypad-btn"
+                  disabled={!room.settings.allowDuplicates && activeCode.includes(d)}
+                  onClick={() => handleKeypadPress(d)}
                   >
                     {d}
                   </button>
@@ -530,7 +653,7 @@ function App() {
                 </button>
               </div>
 
-              <button className="btn-primary" onClick={submitCode} disabled={activeCode.length !== 4}>
+              <button className="btn-primary" onClick={submitCode} disabled={activeCode.length !== room.settings.codeLength}>
                 <Key size={18} /> Lock In Code
               </button>
             </>
@@ -574,7 +697,13 @@ function App() {
                 ACTIVE GAME TURN
               </span>
               <h2 style={{ fontSize: '20px', marginTop: '4px', color: isMyTurn ? 'white' : 'var(--text-muted)' }}>
-                {isMyTurn ? '👉 Your Turn!' : `⏳ ${opponent?.username}...`}
+                {isMyTurn 
+                  ? '👉 Your Turn!' 
+                  : <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      ⏳ {opponent?.username}... 
+                      {opponentTyping && <span className="typing-indicator" style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: 'var(--color-correct)', animation: 'pulse-dot 1s infinite' }} />}
+                    </span>
+                }
               </h2>
             </div>
             
@@ -597,11 +726,14 @@ function App() {
           {/* Active Guesser Keypad (Only visible if it is my turn) */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', background: isMyTurn ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.3)', opacity: isMyTurn ? 1 : 0.6, borderRadius: '20px', padding: '20px', border: isMyTurn ? '1px dashed rgba(255,255,255,0.15)' : '1px solid transparent', transition: 'all 0.3s ease' }}>
             <h3 style={{ fontSize: '16px', textAlign: 'center', color: 'white' }}>
-              {isMyTurn ? "Guess Opponent's Secret Code" : 'Opponent is choosing their guess'}
+              {isMyTurn 
+                ? "Guess Opponent's Secret Code" 
+                : <span>Opponent is choosing their guess {opponentTyping && <span style={{ color: 'var(--color-primary)', marginLeft: '8px', fontSize: '12px', animation: 'pulse-dot 1s infinite' }}>Typing...</span>}</span>
+              }
             </h3>
             
             <div className="digits-container">
-              {[0, 1, 2, 3].map((idx) => (
+              {Array.from({ length: room.settings.codeLength }).map((_, idx) => (
                 <div 
                   key={idx} 
                   className={`digit-box ${isMyTurn && idx === activeCode.length ? 'active' : ''} ${activeCode[idx] !== undefined ? 'filled' : ''}`}
@@ -616,7 +748,7 @@ function App() {
                 <button 
                   key={d} 
                   className="keypad-btn"
-                  disabled={!isMyTurn || activeCode.includes(d)}
+                  disabled={!isMyTurn || (!room.settings.allowDuplicates && activeCode.includes(d))}
                   onClick={() => handleKeypadPress(d)}
                 >
                   {d}

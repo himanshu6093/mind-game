@@ -48,6 +48,12 @@ body {
   justify-content: center;
   align-items: center;
   overflow-x: hidden;
+  animation: bg-heartbeat 4s ease-in-out infinite alternate;
+}
+
+@keyframes bg-heartbeat {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 0% 20%; }
 }
 
 #root {

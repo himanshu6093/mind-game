@@ -75,7 +75,7 @@ export function validateCode(code: string, length = 4, allowDuplicates = false):
 }
 
 export const RoomManager = {
-  createRoom(creatorUsername: string, creatorSocketId: string): Room {
+  createRoom(creatorUsername: string, creatorSocketId: string, settings?: { codeLength?: number, allowDuplicates?: boolean }): Room {
     const roomId = generateRoomId();
     const creator: Player = {
       id: creatorSocketId,
@@ -94,8 +94,8 @@ export const RoomManager = {
       winnerUsername: null,
       winnerCode: null,
       settings: {
-        codeLength: 4,
-        allowDuplicates: false,
+        codeLength: settings?.codeLength || 4,
+        allowDuplicates: settings?.allowDuplicates ?? false,
         turnTimeLimit: 45
       }
     };
@@ -152,7 +152,7 @@ export const RoomManager = {
     }
 
     if (!validateCode(code, room.settings.codeLength, room.settings.allowDuplicates)) {
-      return { room, error: `Code must be exactly ${room.settings.codeLength} unique digits (0-9).` };
+      return { room, error: `Code must be exactly ${room.settings.codeLength} digits (0-9).` };
     }
 
     player.secretCode = code;
@@ -179,9 +179,13 @@ export const RoomManager = {
     }
 
     if (room.turnPlayerId !== playerId) {
-      return { room, error: "Wait for your turn! It's your opponent's turn to guess." };
+      return { room: null, error: 'Not your turn!' };
     }
 
+    if (!validateCode(guess, room.settings.codeLength, room.settings.allowDuplicates)) {
+      return { room: null, error: 'Invalid guess format!' };
+    }
+    
     const guesser = room.players.find(p => p.id === playerId);
     const opponent = room.players.find(p => p.id !== playerId);
 
@@ -191,10 +195,6 @@ export const RoomManager = {
 
     if (!opponent.secretCode) {
       return { room, error: 'Opponent secret code is missing' };
-    }
-
-    if (!validateCode(guess, room.settings.codeLength, room.settings.allowDuplicates)) {
-      return { room, error: `Guess must be exactly ${room.settings.codeLength} unique digits (0-9).` };
     }
 
     // Evaluate guess against opponent's code

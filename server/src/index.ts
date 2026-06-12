@@ -31,13 +31,13 @@ io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
   // 1. Create Room
-  socket.on('create-room', ({ username }: { username: string }) => {
+  socket.on('create-room', ({ username, settings }: { username: string, settings?: { codeLength?: number, allowDuplicates?: boolean } }) => {
     if (!username || username.trim() === '') {
       socket.emit('error-msg', 'Username is required');
       return;
     }
 
-    const room = RoomManager.createRoom(username.trim(), socket.id);
+    const room = RoomManager.createRoom(username.trim(), socket.id, settings);
     socket.join(room.id);
     
     socket.emit('room-created', room);
@@ -116,6 +116,12 @@ io.on('connection', (socket) => {
       io.to(cleanRoomId).emit('room-updated', room);
       console.log(`Game restarted in Room ${cleanRoomId}`);
     }
+  });
+
+  // 6. Live Typing Indicator
+  socket.on('player-typing', ({ roomId }: { roomId: string }) => {
+    // Broadcast to everyone else in the room that this user is typing
+    socket.to(roomId.trim().toUpperCase()).emit('opponent-typing');
   });
 
   // 6. Disconnection

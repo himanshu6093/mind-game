@@ -2,8 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { 
   Play, Plus, Key, RefreshCw, Copy, 
-  LogOut, HelpCircle, User, Hash, Users,
-  Sun, Moon
+  LogOut, HelpCircle, User, Hash, Users
 } from 'lucide-react';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || `http://${window.location.hostname}:3002`;
@@ -57,20 +56,6 @@ function App() {
   const [mobileTab, setMobileTab] = useState<'mine' | 'opponent'>('mine');
   const [gameOverTab, setGameOverTab] = useState<'mine' | 'opponent'>('mine');
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
-  
-  // Theme state
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    return (localStorage.getItem('theme') as 'dark' | 'light') || 'dark';
-  });
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('theme', theme);
-  }, [theme]);
-
-  const toggleTheme = () => {
-    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
-  };
   
   // UI Helpers
   const toastTimeoutRef = useRef<number | null>(null);
@@ -327,15 +312,7 @@ function App() {
   // LOBBY VIEW
   if (!room) {
     return (
-      <div className="glass-container pulse-primary" style={{ position: 'relative' }}>
-        <button 
-          onClick={toggleTheme} 
-          style={{ position: 'absolute', top: '20px', right: '20px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-          title="Toggle Light/Dark Mode"
-        >
-          {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-        </button>
-
+      <div className="glass-container pulse-primary">
         <div style={{ textAlign: 'center' }}>
           <h1 style={{ fontSize: '38px', background: 'linear-gradient(to right, #c084fc, #06b6d4)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '8px' }}>
             MIND GAME
@@ -406,8 +383,9 @@ function App() {
 
   // ROOM SCREEN
   return (
-    <div className={`glass-container ${shake ? 'shake' : ''}`} style={{ maxWidth: '680px', width: '100%' }}>
-      {/* Header Info */}
+    <>
+      <div className={`glass-container ${shake ? 'shake' : ''}`} style={{ maxWidth: '680px', width: '100%', marginTop: '30px' }}>
+        {/* Header Info */}
       <div className="room-header">
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.05em' }}>ROOM CODE</span>
@@ -423,10 +401,7 @@ function App() {
           <span>{room.players.length === 1 ? 'Waiting for opponent...' : 'PvP Match Ready'}</span>
         </div>
 
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <button onClick={toggleTheme} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }} title="Toggle Theme">
-            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
+        <div>
           <button onClick={leaveRoom} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px' }}>
             <LogOut size={16} /> Exit
           </button>
@@ -824,7 +799,8 @@ function App() {
       )}
 
       {toast && <div className="toast-msg">{toast}</div>}
-    </div>
+      </div>
+    </>
   );
 }
 

@@ -20,19 +20,17 @@
   --text-glow: 0 0 10px rgba(173, 40, 49, 0.5);
   
   --bg-gradient-start: #38040e;
+  
+  --input-bg: rgba(0, 0, 0, 0.25);
+  --input-text: white;
+  --box-bg: rgba(0, 0, 0, 0.3);
+  --box-text: white;
+  --keypad-bg: rgba(255, 255, 255, 0.03);
+  --keypad-text: white;
+  --keypad-hover: rgba(255, 255, 255, 0.1);
+  --timer-text: white;
 }
 
-[data-theme="light"] {
-  --bg-dark: #fcf8f8;
-  --bg-card: rgba(255, 255, 255, 0.7);
-  --border-color: rgba(173, 40, 49, 0.2);
-  --border-focus: rgba(173, 40, 49, 0.4);
-  
-  --bg-gradient-start: #ffccd5;
-  
-  --text-main: #250902;
-  --text-muted: #800e13;
-}
 
 * {
   box-sizing: border-box;
@@ -162,10 +160,10 @@ h1, h2, h3, h4 {
 .input-field {
   width: 100%;
   padding: 16px;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--input-bg);
   border: 1px solid var(--border-color);
   border-radius: 12px;
-  color: white;
+  color: var(--input-text);
   font-size: 16px;
   outline: none;
   transition: all 0.2s ease;
@@ -216,13 +214,13 @@ h1, h2, h3, h4 {
 .digit-box {
   width: 60px;
   height: 70px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--box-bg);
   border: 2px solid var(--border-color);
   border-radius: 16px;
   font-family: var(--font-display);
   font-size: 32px;
   font-weight: 800;
-  color: white;
+  color: var(--box-text);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -253,10 +251,10 @@ h1, h2, h3, h4 {
 
 .keypad-btn {
   height: 56px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--keypad-bg);
   border: 1px solid var(--border-color);
   border-radius: 12px;
-  color: white;
+  color: var(--keypad-text);
   font-family: var(--font-display);
   font-size: 20px;
   font-weight: 600;
@@ -268,8 +266,8 @@ h1, h2, h3, h4 {
 }
 
 .keypad-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--keypad-hover);
+  transform: translateY(-2px);
 }
 
 .keypad-btn:active:not(:disabled) {
@@ -611,7 +609,7 @@ h1, h2, h3, h4 {
   font-family: var(--font-display);
   font-size: 22px;
   font-weight: 800;
-  color: white;
+  color: var(--timer-text);
   line-height: 1;
 }
 

@@ -290,10 +290,10 @@ function App() {
       <div className="glass-container pulse-primary">
         <div style={{ textAlign: 'center' }}>
           <h1 style={{ fontSize: '38px', background: 'linear-gradient(to right, #c084fc, #06b6d4)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '8px' }}>
-            BULLS & COWS
+            MIND GAME
           </h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '15px' }}>
-            PvP Codebreaking Duel. Choose a code, guess your friend's code.
+            PvP Codebreaking Duel. Choose a secret code, crack your opponent's.
           </p>
         </div>
 

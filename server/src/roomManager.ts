@@ -21,11 +21,13 @@ export interface Room {
   players: Player[];
   gameState: 'waiting' | 'setting_code' | 'playing' | 'game_over';
   turnPlayerId: string | null; // Socket ID of the player whose turn it is to guess
+  turnDeadline: number | null; // Unix timestamp (ms) when current turn expires
   winnerUsername: string | null;
   winnerCode: string | null;    // The secret code that was cracked
   settings: {
     codeLength: number;
     allowDuplicates: boolean;
+    turnTimeLimit: number; // seconds per turn
   };
 }
 
@@ -88,11 +90,13 @@ export const RoomManager = {
       players: [creator],
       gameState: 'waiting',
       turnPlayerId: null,
+      turnDeadline: null,
       winnerUsername: null,
       winnerCode: null,
       settings: {
         codeLength: 4,
-        allowDuplicates: false
+        allowDuplicates: false,
+        turnTimeLimit: 45
       }
     };
 
@@ -160,6 +164,7 @@ export const RoomManager = {
       room.gameState = 'playing';
       // First player (creator) starts the guessing turn
       room.turnPlayerId = room.players[0].id;
+      room.turnDeadline = Date.now() + room.settings.turnTimeLimit * 1000;
     }
 
     return { room, error: null };
@@ -210,6 +215,7 @@ export const RoomManager = {
     } else {
       // Switch turns
       room.turnPlayerId = opponent.id;
+      room.turnDeadline = Date.now() + room.settings.turnTimeLimit * 1000;
     }
 
     return { room, error: null };
@@ -228,6 +234,7 @@ export const RoomManager = {
 
     room.gameState = room.players.length === 2 ? 'setting_code' : 'waiting';
     room.turnPlayerId = null;
+    room.turnDeadline = null;
     room.winnerUsername = null;
     room.winnerCode = null;
 
@@ -247,6 +254,7 @@ export const RoomManager = {
         // Reset game state if players are fewer than 2
         room.gameState = 'waiting';
         room.turnPlayerId = null;
+        room.turnDeadline = null;
         room.winnerUsername = null;
         room.winnerCode = null;
         
@@ -266,6 +274,40 @@ export const RoomManager = {
       }
     }
     return { room: null, roomId: null };
+  },
+
+  // Get all rooms where the turn timer has expired
+  getExpiredTurnRooms(): { roomId: string; room: Room }[] {
+    const expired: { roomId: string; room: Room }[] = [];
+    const now = Date.now();
+    for (const [roomId, room] of rooms.entries()) {
+      if (
+        room.gameState === 'playing' &&
+        room.turnDeadline &&
+        now >= room.turnDeadline &&
+        room.turnPlayerId
+      ) {
+        expired.push({ roomId, room });
+      }
+    }
+    return expired;
+  },
+
+  // Auto-skip the current player's turn (timer ran out)
+  expireTurn(roomId: string): Room | null {
+    const room = rooms.get(roomId);
+    if (!room || room.gameState !== 'playing' || !room.turnPlayerId) return null;
+
+    const currentPlayer = room.players.find(p => p.id === room.turnPlayerId);
+    const opponent = room.players.find(p => p.id !== room.turnPlayerId);
+
+    if (!currentPlayer || !opponent) return null;
+
+    // Switch turn to opponent with fresh timer
+    room.turnPlayerId = opponent.id;
+    room.turnDeadline = Date.now() + room.settings.turnTimeLimit * 1000;
+
+    return room;
   },
 
   getRoom(roomId: string): Room | null {

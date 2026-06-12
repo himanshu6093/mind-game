@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { 
   Play, Plus, Key, RefreshCw, Copy, 
-  LogOut, HelpCircle, User, Hash, Users 
+  LogOut, HelpCircle, User, Hash, Users,
+  Sun, Moon
 } from 'lucide-react';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || `http://${window.location.hostname}:3002`;
@@ -30,11 +31,13 @@ interface Room {
   players: Player[];
   gameState: 'waiting' | 'setting_code' | 'playing' | 'game_over';
   turnPlayerId: string | null;
+  turnDeadline: number | null;
   winnerUsername: string | null;
   winnerCode: string | null;
   settings: {
     codeLength: number;
     allowDuplicates: boolean;
+    turnTimeLimit: number;
   };
 }
 
@@ -52,6 +55,22 @@ function App() {
   const [shake, setShake] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<'mine' | 'opponent'>('mine');
+  const [gameOverTab, setGameOverTab] = useState<'mine' | 'opponent'>('mine');
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  
+  // Theme state
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    return (localStorage.getItem('theme') as 'dark' | 'light') || 'dark';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  };
   
   // UI Helpers
   const toastTimeoutRef = useRef<number | null>(null);
@@ -98,6 +117,10 @@ function App() {
     s.on('error-msg', (msg: string) => {
       showToast(msg);
       triggerShake();
+    });
+
+    s.on('turn-expired', ({ message }: { message: string }) => {
+      showToast(message);
     });
 
     return () => {
@@ -160,6 +183,23 @@ function App() {
       setRoomIdInput(roomParam.toUpperCase());
     }
   }, []);
+
+  // Countdown timer effect
+  useEffect(() => {
+    if (!room || room.gameState !== 'playing' || !room.turnDeadline) {
+      setTimeLeft(null);
+      return;
+    }
+
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((room.turnDeadline! - Date.now()) / 1000));
+      setTimeLeft(remaining);
+    };
+
+    tick(); // initial
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [room?.turnDeadline, room?.gameState]);
 
   // Keyboard controls for digit typing
   useEffect(() => {
@@ -287,7 +327,15 @@ function App() {
   // LOBBY VIEW
   if (!room) {
     return (
-      <div className="glass-container pulse-primary">
+      <div className="glass-container pulse-primary" style={{ position: 'relative' }}>
+        <button 
+          onClick={toggleTheme} 
+          style={{ position: 'absolute', top: '20px', right: '20px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+          title="Toggle Light/Dark Mode"
+        >
+          {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+        </button>
+
         <div style={{ textAlign: 'center' }}>
           <h1 style={{ fontSize: '38px', background: 'linear-gradient(to right, #c084fc, #06b6d4)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '8px' }}>
             MIND GAME
@@ -375,9 +423,14 @@ function App() {
           <span>{room.players.length === 1 ? 'Waiting for opponent...' : 'PvP Match Ready'}</span>
         </div>
 
-        <button onClick={leaveRoom} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px' }}>
-          <LogOut size={16} /> Exit
-        </button>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button onClick={toggleTheme} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }} title="Toggle Theme">
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+          <button onClick={leaveRoom} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px' }}>
+            <LogOut size={16} /> Exit
+          </button>
+        </div>
       </div>
 
       {/* Players view */}
@@ -546,12 +599,20 @@ function App() {
                 ACTIVE GAME TURN
               </span>
               <h2 style={{ fontSize: '20px', marginTop: '4px', color: isMyTurn ? 'white' : 'var(--text-muted)' }}>
-                {isMyTurn ? '👉 It is Your Turn!' : `⏳ Waiting for ${opponent?.username}...`}
+                {isMyTurn ? '👉 Your Turn!' : `⏳ ${opponent?.username}...`}
               </h2>
             </div>
             
+            {/* Timer */}
+            {timeLeft !== null && (
+              <div className={`turn-timer ${timeLeft <= 10 ? 'danger' : ''}`}>
+                <span className="timer-value">{timeLeft}</span>
+                <span className="timer-label">sec</span>
+              </div>
+            )}
+            
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>YOUR SECRET CODE</span>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>YOUR CODE</span>
               <span style={{ fontSize: '18px', fontFamily: 'var(--font-display)', fontWeight: 800, color: 'var(--color-secondary)', letterSpacing: '0.1em' }}>
                 {myPlayer?.secretCode}
               </span>
@@ -717,10 +778,26 @@ function App() {
             </button>
           </div>
 
+          {/* Mobile Tab Switcher for Game Over */}
+          <div className="mobile-history-tabs">
+            <button 
+              className={`tab-btn ${gameOverTab === 'mine' ? 'active' : ''}`}
+              onClick={() => setGameOverTab('mine')}
+            >
+              Your Guesses ({myPlayer?.guesses.length})
+            </button>
+            <button 
+              className={`tab-btn ${gameOverTab === 'opponent' ? 'active' : ''}`}
+              onClick={() => setGameOverTab('opponent')}
+            >
+              {opponent?.username}'s ({opponent?.guesses.length})
+            </button>
+          </div>
+
           {/* Detailed Recaps */}
-          <div style={{ width: '100%', borderTop: '1px solid var(--border-color)', paddingTop: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', textAlign: 'left' }}>
-            <div>
-              <h3 style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '10px' }}>YOUR GUESS LOG</h3>
+          <div className="history-duel-grid" style={{ width: '100%', borderTop: '1px solid var(--border-color)', paddingTop: '20px', textAlign: 'left' }}>
+            <div className={`history-column ${gameOverTab !== 'mine' ? 'mobile-hidden' : ''}`}>
+              <h3 className="desktop-history-title" style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '10px' }}>YOUR GUESS LOG</h3>
               <div className="history-container" style={{ maxHeight: '160px' }}>
                 {myPlayer?.guesses.map((item, idx) => (
                   <div key={idx} className="history-item" style={{ padding: '6px 10px', borderRadius: '10px', fontSize: '12px' }}>
@@ -731,8 +808,8 @@ function App() {
               </div>
             </div>
 
-            <div>
-              <h3 style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '10px' }}>{opponent?.username}'S GUESS LOG</h3>
+            <div className={`history-column ${gameOverTab !== 'opponent' ? 'mobile-hidden' : ''}`}>
+              <h3 className="desktop-history-title" style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '10px' }}>{opponent?.username}'S GUESS LOG</h3>
               <div className="history-container" style={{ maxHeight: '160px' }}>
                 {opponent?.guesses.map((item, idx) => (
                   <div key={idx} className="history-item" style={{ padding: '6px 10px', borderRadius: '10px', fontSize: '12px' }}>

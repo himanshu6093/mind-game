@@ -130,6 +130,19 @@ io.on('connection', (socket) => {
   });
 });
 
+// Timer tick: check for expired turns every second
+setInterval(() => {
+  const expired = RoomManager.getExpiredTurnRooms();
+  for (const { roomId } of expired) {
+    const updatedRoom = RoomManager.expireTurn(roomId);
+    if (updatedRoom) {
+      io.to(roomId).emit('room-updated', updatedRoom);
+      io.to(roomId).emit('turn-expired', { message: 'Time is up! Turn skipped.' });
+      console.log(`Turn expired in Room ${roomId}, auto-switched.`);
+    }
+  }
+}, 1000);
+
 httpServer.listen(Number(port), '0.0.0.0', () => {
   console.log(`Server listening on port ${port} (accessible on local network)`);
 });
